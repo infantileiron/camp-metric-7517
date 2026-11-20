@@ -38,3 +38,10 @@ class RunInput(BaseModel):
   if self.date_from>self.date_to:raise ValueError('开始日不得晚于结束日')
   return self
 class NoteInput(BaseModel):note:str=Field(min_length=8,max_length=2000)
+class AttributionInput(BaseModel):
+ baseline_id:int=Field(gt=0)
+ current_id:int=Field(gt=0)
+ @model_validator(mode='after')
+ def pair(self):
+  if self.baseline_id==self.current_id:raise ValueError('需要选择两次不同的签核')
+  return self

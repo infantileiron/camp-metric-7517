@@ -23,6 +23,43 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: attributions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.attributions (
+    id integer NOT NULL,
+    baseline_id integer NOT NULL,
+    current_id integer NOT NULL,
+    state character varying(20),
+    inputs json,
+    result json,
+    error text,
+    requested_by character varying(100),
+    created character varying(40)
+);
+
+
+--
+-- Name: attributions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.attributions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: attributions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.attributions_id_seq OWNED BY public.attributions.id;
+
+
+--
 -- Name: audits; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -89,6 +126,13 @@ CREATE SEQUENCE public.facts_id_seq
 --
 
 ALTER SEQUENCE public.facts_id_seq OWNED BY public.facts.id;
+
+
+--
+-- Name: attributions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attributions ALTER COLUMN id SET DEFAULT nextval('public.attributions_id_seq'::regclass);
 
 
 --
@@ -284,6 +328,22 @@ ALTER TABLE ONLY public.snapshots
 
 
 --
+-- Name: attributions attributions_baseline_id_current_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attributions
+    ADD CONSTRAINT attributions_baseline_id_current_id_key UNIQUE (baseline_id, current_id);
+
+
+--
+-- Name: attributions attributions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attributions
+    ADD CONSTRAINT attributions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -297,6 +357,22 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: attributions attributions_baseline_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attributions
+    ADD CONSTRAINT attributions_baseline_id_fkey FOREIGN KEY (baseline_id) REFERENCES public.snapshots(id);
+
+
+--
+-- Name: attributions attributions_current_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attributions
+    ADD CONSTRAINT attributions_current_id_fkey FOREIGN KEY (current_id) REFERENCES public.snapshots(id);
 
 
 --

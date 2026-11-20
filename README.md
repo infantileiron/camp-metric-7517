@@ -6,7 +6,7 @@
 
 启航训练营经营分析组服务四个线上/线下班级，每天收到班主任的 `启航_班级日报_20261115.xlsx`。原流程由分析员在工作簿计算实到率、结课达成率、退款占比，再把数字抄入经营会纪要。痛点是分子分母的过滤范围不一致、修改公式后旧结论失去依据、数据更正与口径变化无法分清。本项目接收上游班级日事实，替代口径登记/试算/差异解释，给下游经营负责人提供冻结依据。
 
-三个业务实体：指标定义Metric（代码+版本唯一）、班级日事实Fact（班级+日期唯一）、试算签核快照Snapshot。四页是口径目录、事实校验、口径试算和签核历史；另有登录。后台worker真实计算，签核锁定口径与意见，后续事实修改不改变历史快照。
+三个业务实体：指标定义Metric（代码+版本唯一）、班级日事实Fact（班级+日期唯一）、试算签核快照Snapshot。四页是口径目录、事实校验、口径试算和签核历史；另有登录。签核历史页还能对两次签核做归因，拆出口径与各班日报对指标差值的贡献。后台worker真实计算，签核锁定口径与意见，后续事实修改不改变历史快照。
 
 |角色|权限|典型动作|
 |---|---|---|
@@ -46,6 +46,14 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 签核需要已成功、非undefined、业务解释至少8字且口径仍与试算一致；试算后修订口径必须重算。签核后锁定口径版本和意见，事实更正不改旧快照。已有冻结版本可再次以新事实试算，但仍保留各次输入。
 
+## 两次签核归因
+
+签核历史页可选择同指标代码、同日期窗的两次已签核快照（基线、当前），发起归因，查看各因素对差值（pp）的贡献与计算依据。归因只读取两次签核快照中冻结的口径和班级日报，不回读现行口径或现行事实；即使之后口径或事实再改，重试归因仍用原签核。
+
+口径与每个发生变化的班日报各算一个因素：因素取“当前”时用当前签核版本、取“基线”时用基线签核版本，其余因素保持对应版本，逐行套用白名单表达式后分别汇总分子/分母相除。贡献是全部替换顺序下边际影响的平均（Shapley 值），因此与替换顺序无关，合计恒等于实际比值差（结果给出残差供核对）；未变化的班贡献为 0。只改名称或版本号、不改变表达式的口径字段不作为因素，但仍列在计算依据里。
+
+因素数不超过 12 时穷举全部 2^n 组替换并逐个校验，结果精确。班级更多时用固定种子的置换抽样估算，给出每项 95% 置信误差界、抽样次数、已访问组合数与校验范围；端点仍用冻结数据精确重算，贡献合计仍等于实际差。任何混搭组合无法算出比值（行级除零、外层分母为零、超限）时整体失败，明确列出出错的组合（哪版口径、哪些班换成当前版），此时不给出任何贡献。归因排队后中断，worker 启动时按原签核重新入队；同一对签核重复提交返回原记录，不新增归因；失败记录可原地重试。计算完成后可查看并导出 `camp-attribution-<id>.json`。
+
 ## 工程、本地开发与范围
 
 |层|技术|
@@ -59,6 +67,6 @@ backend等待db/redis健康，worker再等backend，frontend等backend；恰好�
 
 环境变量见.env.example：COMPOSE_PROJECT_NAME、FRONTEND_PORT、BACKEND_PORT、DB_PORT、DB_PASSWORD、JWT_SECRET、SEED_DEMO、NETWORK_SUBNET。演示凭据/密钥部署时替换。本地开发先起db/redis，backend安装requirements，设置DATABASE_URL/REDIS_URL/JWT_SECRET后 `uvicorn src.main:app --reload`；前端保留同源Nginx或开发代理。
 
-目录按backend/src的routes/controllers/services/models/schemas/middlewares/config/utils及frontend/src的api/stores/pages/components/hooks/utils/constants/types/router拆分。共享表格、字段、状态标签；表单hooks与HTML转义；请求ID/安全头中间件、业务审计和全局错误处理。枚举ROLES/STATES/MODES/APPROVALS/FIELDS位于后端constants/enums.py、schemas/business.py和前端constants/enums.js。ORM建初表，migrations/001_initial.sql保留实际DDL；无在线版本迁移执行器。
+目录按backend/src的routes/controllers/services/models/schemas/middlewares/config/utils及frontend/src的api/stores/pages/components/hooks/utils/constants/types/router拆分。共享表格、字段、状态标签；表单hooks与HTML转义；请求ID/安全头中间件、业务审计和全局错误处理。枚举ROLES/STATES/MODES/APPROVALS/FIELDS位于后端constants/enums.py、schemas/business.py和前端constants/enums.js。ORM建初表（启动时补齐缺失表，含 `attributions`），migrations/001_initial.sql保留实际DDL；无在线版本迁移执行器。归因服务在 `backend/src/services/attribution.py`，结果持久化到 `attributions`，与快照共用 worker 队列和 `/artifacts` 卷。
 
 小型范围：逐条表单/API录入，无Excel批导、删除、分页或跨指标引用；单worker，启动恢复待处理任务。班级日事实是人次，不能解释为去重学员留存。签核只在站内，不外发邮件/电子签章。Google Fonts依赖网络，离线回退serif/sans-serif。测试证据在 `../../test-artifacts/gb-3111/TESTING.md`，源码无截图/日志。MIT License见LICENSE。

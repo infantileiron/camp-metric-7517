@@ -12,6 +12,9 @@ class Fact(Base):
 class Snapshot(Base):
  __tablename__='snapshots'
  id=Column(Integer,primary_key=True);metric_id=Column(Integer,ForeignKey('metrics.id'));baseline_id=Column(Integer,ForeignKey('snapshots.id'),nullable=True);date_from=Column(String(10));date_to=Column(String(10));state=Column(String(20),default='queued');result=Column(JSON,nullable=True);error=Column(Text,default='');note=Column(Text,default='');approval=Column(String(20),default='draft');approved_by=Column(String(100),default='')
+class Attribution(Base):
+ __tablename__='attributions';__table_args__=(UniqueConstraint('baseline_id','current_id'),)
+ id=Column(Integer,primary_key=True);baseline_id=Column(Integer,ForeignKey('snapshots.id'),nullable=False);current_id=Column(Integer,ForeignKey('snapshots.id'),nullable=False);state=Column(String(20),default='queued');inputs=Column(JSON,nullable=True);result=Column(JSON,nullable=True);error=Column(Text,default='');requested_by=Column(String(100),default='');created=Column(String(40),default='')
 class Audit(Base):
  __tablename__='audits'
  id=Column(Integer,primary_key=True);actor=Column(String(100));action=Column(String(200));created=Column(String(40))

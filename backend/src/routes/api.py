@@ -1,9 +1,10 @@
 import os,json
+from datetime import datetime,timezone
 import redis
 from fastapi import APIRouter,Depends,HTTPException,Response
 from src.config.database import db
-from src.models.entities import User,Metric,Fact,Snapshot,Audit
-from src.schemas.business import Login,MetricInput,FactInput,RunInput,NoteInput
+from src.models.entities import User,Metric,Fact,Snapshot,Audit,Attribution
+from src.schemas.business import Login,MetricInput,FactInput,RunInput,NoteInput,AttributionInput
 from src.middlewares.auth import current,editor,admin
 from src.utils.security import verify,token
 from src.services.business import audit,dump
@@ -72,3 +73,55 @@ def export(i:int,u=Depends(current),s=Depends(db)):
  return Response(json.dumps(dump(r),ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':f'attachment; filename="camp-metric-{i}.json"'})
 @router.get('/audits')
 def audits(u=Depends(admin),s=Depends(db)):return [dump(r) for r in s.query(Audit).order_by(Audit.id.desc()).limit(100)]
+
+def _frozen_pair(s,data):
+ b=ensure.approved_snapshot(s,data.baseline_id);c=ensure.approved_snapshot(s,data.current_id)
+ if b.result.get('value') is None or c.result.get('value') is None:raise HTTPException(409,'存在undefined快照，不能归因')
+ bm=b.result['metric']['code'];cm=c.result['metric']['code']
+ if bm!=cm:raise HTTPException(409,'只能对同一指标代码的两次签核做归因')
+ if (str(b.date_from),str(b.date_to))!=(str(c.date_from),str(c.date_to)):raise HTTPException(409,'两次签核的日期窗不同，无法只按口径和日报归因')
+ from src.services.attribution import freeze_snapshot
+ try:return freeze_snapshot(b),freeze_snapshot(c)
+ except ValueError as e:raise HTTPException(409,str(e))
+
+
+@router.get('/attributions')
+def attributions(u=Depends(current),s=Depends(db)):
+ return [_public(r) for r in s.query(Attribution).order_by(Attribution.id.desc()).all()]
+
+
+def _public(row):
+ out=dump(row);out.pop('inputs',None);return out
+
+@router.post('/attributions')
+def create_attribution(data:AttributionInput,u=Depends(editor),s=Depends(db)):
+ baseline,current=_frozen_pair(s,data)
+ existing=s.query(Attribution).filter_by(baseline_id=data.baseline_id,current_id=data.current_id).first()
+ if existing:
+  if existing.state in ('queued','running','done'):return _public(existing)
+  # 失败重试复用原记录，不新增归因；输入仍是当初冻结的两次签核。
+  existing.state='queued';existing.error='';s.commit()
+  try:redis.Redis.from_url(os.environ['REDIS_URL']).rpush('camp:attributions',existing.id)
+  except redis.RedisError:
+   existing.state='failed';existing.error='队列不可用，请恢复后重试';s.commit();raise HTTPException(503,existing.error)
+  audit(s,u,'重试归因 '+str(existing.id));return _public(existing)
+ r=Attribution(baseline_id=data.baseline_id,current_id=data.current_id,state='queued',inputs={'baseline':baseline,'current':current},requested_by=u.email,created=datetime.now(timezone.utc).isoformat());s.add(r)
+ try:s.commit()
+ except Exception:
+  s.rollback();existing=s.query(Attribution).filter_by(baseline_id=data.baseline_id,current_id=data.current_id).first()
+  if existing:return _public(existing)
+  raise
+ try:redis.Redis.from_url(os.environ['REDIS_URL']).rpush('camp:attributions',r.id)
+ except redis.RedisError:
+  r.state='failed';r.error='队列不可用，请恢复后重试';s.commit();raise HTTPException(503,r.error)
+ audit(s,u,'提交归因 '+str(r.id));return _public(r)
+
+@router.get('/attributions/{i}')
+def attribution(i:int,u=Depends(current),s=Depends(db)):
+ row=dump(ensure.attribution(s,i));row.pop('inputs',None);return row
+
+@router.get('/attributions/{i}/export')
+def attribution_export(i:int,u=Depends(current),s=Depends(db)):
+ r=ensure.attribution(s,i)
+ if r.state!='done':raise HTTPException(409,'仅完成的归因可导出')
+ return Response(json.dumps(dump(r),ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':f'attachment; filename="camp-attribution-{i}.json"'})
